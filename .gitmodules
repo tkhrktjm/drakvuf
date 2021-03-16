@@ -14,3 +14,8 @@
 	path = dwarf2json
 	url = https://github.com/tklengyel/dwarf2json
 	ignore = dirty
+[submodule "json-c"]
+	path = json-c
+	url = https://github.com/json-c/json-c.git
+	branch = json-c-0.15
+	ignore = dirty
