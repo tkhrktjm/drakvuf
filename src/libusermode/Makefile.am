@@ -132,7 +132,7 @@ endif
 if !DEBUG
 AM_CXXFLAGS += -Wno-c99-designator -Wno-reorder-init-list
 else
-AM_CXXFLAGS += -DDRAKVUF_DEBUG -Werror -Wall -Wextra -g -ggdb3
+AM_CXXFLAGS += -DDRAKVUF_DEBUG -Wall -Wextra -g -ggdb3
 AM_CXXFLAGS += -Wno-unused-parameter -Wno-unknown-warning-option
 AM_CXXFLAGS += -Wno-c99-designator -Wno-reorder-init-list
 AM_CXXFLAGS += -Wcast-qual -Wcast-align -Wstrict-aliasing \
