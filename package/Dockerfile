@@ -1,0 +1,154 @@
+ARG IMAGE
+FROM ${IMAGE} AS drakvuf-base-builder
+
+ARG TZ=JST-9
+ENV TZ=${TZ}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USER root
+
+RUN set -x \
+ && grep '^deb ' /etc/apt/sources.list \
+  | sed 's/^deb /deb-src /g' \
+  | grep ubuntu.com \
+  | tee /etc/apt/sources.list.d/deb-src.list \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && apt-get install -y \
+  build-essential \
+  git \
+  wget \
+  curl \
+  cmake \
+  flex \
+  bison \
+  autoconf-archive \
+  clang \
+  clang-9 \
+  libc++-9-dev \
+  libc++abi-9-dev \
+  python3-dev \
+  libsystemd-dev \
+  nasm \
+  bc \
+ && { test -z "$(apt-cache search --names-only '^python-is-python2$')" \
+  || apt-get install -y python-is-python2 ; } \
+ && apt-get build-dep -y xen \
+ && apt-get autoremove -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /src/*.deb
+
+ENV GOLANG_VERSION=1.16.2
+ARG GOLANG_DOWNLOAD_URL=https://golang.org/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz
+ARG GOLANG_SHA256=542e936b19542e62679766194364f45141fde55169db2d8d01046555ca9eb4b8
+RUN set -x \
+ && curl -fsSL "${GOLANG_DOWNLOAD_URL}" -o golang.tar.gz \
+ && echo "${GOLANG_SHA256} golang.tar.gz" | sha256sum -c - \
+ && tar -C /usr/local -xzf golang.tar.gz \
+ && rm golang.tar.gz
+
+
+FROM drakvuf-base-builder AS drakvuf-xen-builder
+
+ENV BUILD_DIR=/build-xen
+RUN set -x \
+ && mkdir ${BUILD_DIR}
+#VOLUME ${BUILD_DIR}
+WORKDIR ${BUILD_DIR}
+
+COPY xen ${BUILD_DIR}/
+COPY package/patch-xen.sh ${BUILD_DIR}/
+
+RUN set -x \
+ && cd ${BUILD_DIR} \
+ && chmod +x patch-xen.sh \
+ && ./patch-xen.sh \
+ && echo "Building Xen, this may take a few minutes..." \
+ && ./configure \
+  --prefix=/usr \
+  --enable-githttp \
+  --disable-pvshim \
+  --enable-systemd \
+  --enable-ovmf \
+ && echo CONFIG_EXPERT=y > xen/.config \
+ && echo CONFIG_MEM_SHARING=y >> xen/.config \
+ && make -C xen olddefconfig \
+ && echo "Running Xen's make dist..." \
+ && make -j$(nproc) dist \
+ && make -j$(nproc) dist-xen \
+ && make -j$(nproc) dist-tools \
+ && echo "Install Xen..." \
+ && make -j$(nproc) install-xen \
+ && make -j$(nproc) install-tools
+
+
+FROM drakvuf-base-builder AS drakvuf-builder
+
+ENV BUILD_DIR=/build
+RUN set -x \
+ && mkdir ${BUILD_DIR}
+#VOLUME ${BUILD_DIR}
+WORKDIR ${BUILD_DIR}
+
+RUN set -x \
+ && mkdir -p /build-xen
+COPY --from=drakvuf-xen-builder /build-xen/dist/ /build-xen/dist/
+RUN set -x \
+ && cd /build-xen/dist \
+ && ./install.sh \
+ && mv -vf /build-xen/dist/install /dist-xen
+
+ENV INSTALL_PATH=/build/usr
+
+COPY . ${BUILD_DIR}
+
+RUN set -x \
+ && cd ${BUILD_DIR}/dwarf2json \
+ && /usr/local/go/bin/go mod tidy \
+ && /usr/local/go/bin/go build
+
+RUN set -x \
+ && cd ${BUILD_DIR}/json-c \
+ && cmake -DCMAKE_INSTALL_PREFIX=/usr . \
+ && make install \
+ && make DESTDIR=/build install \
+ && ldconfig \
+ && ldconfig -p | grep json-c
+
+RUN set -x \
+ && cd ${BUILD_DIR}/libvmi \
+ && autoreconf -vif \
+ && ./configure \
+  --prefix="${INSTALL_PATH}" \
+  --disable-static \
+  --disable-kvm \
+  --disable-file \
+  --disable-bareflank \
+  --disable-safety-checks \
+  --enable-vmi-debug \
+ && make -j$(nproc) \
+ && make install \
+ && rm ${INSTALL_PATH}/lib/libvmi.la \
+ && echo ${INSTALL_PATH}/lib >/etc/ld.so.conf.d/drakvuf.conf \
+ && ldconfig \
+ && ldconfig -p | grep libvmi
+
+RUN set -x \
+ && cd ${BUILD_DIR} \
+ && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PATH}/lib" \
+ && export PKG_CONFIG_PATH="${INSTALL_PATH}/lib/pkgconfig/" \
+ && export LDFLAGS="-L${INSTALL_PATH}/lib" \
+ && export CFLAGS="-I${INSTALL_PATH}/include" \
+ && export CXXFLAGS="-I${INSTALL_PATH}/include" \
+ && autoreconf -vif \
+ && ./configure \
+  CXX='clang++-9' \
+  CXXFLAGS="-I${INSTALL_PATH}/include" \
+  --prefix="${INSTALL_PATH}" \
+ && make -j$(nproc) \
+ && make install
+
+RUN set -x \
+ && chmod +x package/mkdeb
+CMD ./package/mkdeb
