@@ -23,14 +23,15 @@ RUN set -x \
   flex \
   bison \
   autoconf-archive \
-  clang \
-  clang-9 \
-  libc++-9-dev \
-  libc++abi-9-dev \
+  clang-10 \
+  libc++-10-dev \
+  libc++abi-10-dev \
   python3-dev \
   libsystemd-dev \
   nasm \
   bc \
+  ninja-build \
+  libgnutls28-dev \
  && { test -z "$(apt-cache search --names-only '^python-is-python2$')" \
   || apt-get install -y python-is-python2 ; } \
  && apt-get build-dep -y xen \
@@ -39,9 +40,9 @@ RUN set -x \
  && rm -rf /var/lib/apt/lists/* \
  && rm -rf /src/*.deb
 
-ENV GOLANG_VERSION=1.16.2
-ARG GOLANG_DOWNLOAD_URL=https://golang.org/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz
-ARG GOLANG_SHA256=542e936b19542e62679766194364f45141fde55169db2d8d01046555ca9eb4b8
+ENV GOLANG_VERSION=1.19.5
+ARG GOLANG_DOWNLOAD_URL=https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz
+ARG GOLANG_SHA256=36519702ae2fd573c9869461990ae550c8c0d955cd28d2827a6b159fda81ff95
 RUN set -x \
  && curl -fsSL "${GOLANG_DOWNLOAD_URL}" -o golang.tar.gz \
  && echo "${GOLANG_SHA256} golang.tar.gz" | sha256sum -c - \
@@ -106,7 +107,7 @@ COPY . ${BUILD_DIR}
 RUN set -x \
  && cd ${BUILD_DIR}/dwarf2json \
  && /usr/local/go/bin/go mod tidy \
- && /usr/local/go/bin/go build
+ && CGO_ENABLED=0 /usr/local/go/bin/go build
 
 RUN set -x \
  && cd ${BUILD_DIR}/json-c \
@@ -141,11 +142,11 @@ RUN set -x \
  && export LDFLAGS="-L${INSTALL_PATH}/lib" \
  && export CFLAGS="-I${INSTALL_PATH}/include" \
  && export CXXFLAGS="-I${INSTALL_PATH}/include" \
+ && export CXX="clang++-10" \
  && autoreconf -vif \
  && ./configure \
-  CXX='clang++-9' \
-  CXXFLAGS="-I${INSTALL_PATH}/include" \
   --prefix="${INSTALL_PATH}" \
+  --with-stdlib=libc++ \
  && make -j$(nproc) \
  && make install
 
